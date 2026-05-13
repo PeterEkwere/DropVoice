@@ -1,0 +1,837 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>DropVoice Local Preview</title>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
+<script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js" crossorigin="anonymous"></script>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --ac:#25D366;
+  --ac2:#128C7E;
+  --funds1:#128C7E;
+  --funds2:#075E54;
+  --acl:#DCF8C6;
+  --bg:#ffffff;
+  --sf:#f7f7f8;
+  --bd:#ebebeb;
+  --tx:#0a0a0f;
+  --mu:#999;
+  --danger:#f87171;
+  --fn:'Poppins',sans-serif;
+}
+body{font-family:var(--fn);background:var(--bg);color:var(--tx);min-height:100dvh;display:flex;flex-direction:column;align-items:center}
+#root{width:100%;max-width:540px;min-height:100dvh;display:flex;flex-direction:column}
+::-webkit-scrollbar{width:3px;height:3px}
+::-webkit-scrollbar-thumb{background:#ddd;border-radius:3px}
+@keyframes pulse{0%{transform:scale(1);opacity:.5}100%{transform:scale(1.7);opacity:0}}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes up{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:translateY(0)}}
+@keyframes wave{0%,100%{transform:scaleY(.25)}50%{transform:scaleY(1)}}
+@keyframes fin{from{opacity:0}to{opacity:1}}
+@keyframes min{from{opacity:0;transform:translateY(36px) scale(.97)}to{opacity:1;transform:translateY(0) scale(1)}}
+@keyframes dot-bounce{0%,80%,100%{transform:translateY(0);opacity:.4}40%{transform:translateY(-5px);opacity:1}}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const {useEffect,useMemo,useRef,useState} = React;
+
+const API_BASE = localStorage.getItem("dropvoice_api_base") || new URLSearchParams(window.location.search).get("api") || "http://127.0.0.1:8000/v1";
+const API_ORIGIN = new URL(API_BASE).origin;
+const INSTALLATION_KEY = "dropvoice_installation_id";
+const TOKEN_KEY = "dropvoice_device_token";
+const TOPUP_AMOUNTS = [4000, 8000, 12000, 20000, 40000];
+const LANG_META = {
+  en:{label:"English",flag:"🇺🇸"},
+  ar:{label:"Arabic",flag:"🇸🇦"},
+  zh:{label:"Chinese",flag:"🇨🇳"},
+  hi:{label:"Hindi",flag:"🇮🇳"},
+  es:{label:"Spanish",flag:"🇪🇸"},
+  fr:{label:"French",flag:"🇫🇷"},
+  de:{label:"German",flag:"🇩🇪"},
+  pt:{label:"Portuguese",flag:"🇧🇷"},
+  it:{label:"Italian",flag:"🇮🇹"},
+  ja:{label:"Japanese",flag:"🇯🇵"},
+  ko:{label:"Korean",flag:"🇰🇷"},
+  ru:{label:"Russian",flag:"🇷🇺"},
+  nl:{label:"Dutch",flag:"🇳🇱"},
+  tr:{label:"Turkish",flag:"🇹🇷"},
+  pl:{label:"Polish",flag:"🇵🇱"},
+};
+const EMOTIONS = [
+  {label:"Neutral"},
+  {label:"Happy"},
+  {label:"Laughing"},
+  {label:"Calm"},
+  {label:"Sad"},
+  {label:"Angry"},
+  {label:"Whisper"},
+];
+const PACES = [
+  {value:"slow",label:"Slow"},
+  {value:"normal",label:"Normal"},
+  {value:"fast",label:"Fast"},
+];
+
+function ensureInstallationId(){
+  let value = localStorage.getItem(INSTALLATION_KEY);
+  if(!value){
+    value = (crypto.randomUUID ? crypto.randomUUID() : `dv-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+    localStorage.setItem(INSTALLATION_KEY, value);
+  }
+  return value;
+}
+
+function formatNairaFromKobo(kobo){
+  return `₦${Math.round((kobo || 0) / 100).toLocaleString()}`;
+}
+
+function formatDuration(seconds){
+  if(!Number.isFinite(seconds)) return "--:--";
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.round(seconds % 60).toString().padStart(2, "0");
+  return `${mins}:${secs}`;
+}
+
+function resolveBackendUrl(path){
+  if(path.startsWith("http://") || path.startsWith("https://")) return path;
+  if(path.startsWith("/v1/")) return `${API_ORIGIN}${path}`;
+  if(path.startsWith("/")) return `${API_BASE}${path}`;
+  return `${API_BASE}/${path}`;
+}
+
+function Bars({on}){
+  const h = useMemo(() => Array.from({length:26},() => Math.max(5,Math.floor(Math.random()*26))), []);
+  return(
+    <div style={{display:"flex",alignItems:"center",gap:3,height:30}}>
+      {h.map((v,i)=>(
+        <div key={i} style={{width:3,borderRadius:2,background:"var(--ac)",height:v,
+          animation:on?`wave ${.35+(i%5)*.08}s ease-in-out infinite alternate`:"none",
+          animationDelay:`${i*.04}s`,opacity:on?1:.3,transition:"opacity .3s"}}/>
+      ))}
+    </div>
+  );
+}
+
+function FundsModal({onClose,bal,pay,busy}){
+  const [sel,setSel]=useState(TOPUP_AMOUNTS[0]);
+  const [customAmount,setCustomAmount]=useState("");
+  const voiceCount=Math.floor(sel/4000);
+  const canPay = Number.isFinite(sel) && sel > 0;
+
+  function onPreset(amount){
+    setSel(amount);
+    setCustomAmount("");
+  }
+
+  function onCustomChange(value){
+    setCustomAmount(value);
+    const parsed = Number.parseInt(value, 10);
+    setSel(Number.isFinite(parsed) && parsed > 0 ? parsed : 0);
+  }
+
+  return(
+    <div onClick={()=>onClose()} style={{position:"fixed",inset:0,background:"rgba(10,10,15,.45)",
+      backdropFilter:"blur(10px)",display:"flex",alignItems:"flex-end",justifyContent:"center",
+      zIndex:999,animation:"fin .2s"}}>
+      <div onClick={e=>e.stopPropagation()} style={{background:"#fff",borderRadius:"26px 26px 0 0",
+        padding:"28px 24px 44px",width:"100%",maxWidth:540,animation:"min .28s cubic-bezier(.22,1,.36,1)"}}>
+        <div style={{width:38,height:4,borderRadius:2,background:"#ddd",margin:"0 auto 24px"}}/>
+        <div style={{fontSize:21,fontWeight:800,marginBottom:4}}>Add Credits</div>
+        <div style={{fontSize:13,color:"#999",marginBottom:22}}>
+          Balance: <strong style={{color:"var(--ac)"}}>{formatNairaFromKobo(bal)}</strong>
+        </div>
+        <div style={{display:"flex",gap:8,marginBottom:24,flexWrap:"wrap"}}>
+          {TOPUP_AMOUNTS.map(a=>(
+            <button key={a} onClick={()=>onPreset(a)} style={{
+              flex:1,minWidth:76,padding:"13px 0",borderRadius:14,border:"2px solid",
+              borderColor:sel===a && customAmount===""?"var(--ac)":"#ebebeb",
+              background:sel===a && customAmount===""?"var(--acl)":"#fafafa",
+              color:sel===a && customAmount===""?"var(--ac)":"#444",
+              fontFamily:"var(--fn)",fontWeight:700,fontSize:14,cursor:"pointer",transition:"all .15s"
+            }}>{`₦${a.toLocaleString()}`}</button>
+          ))}
+        </div>
+        <div style={{marginBottom:24}}>
+          <div style={{fontSize:11,fontWeight:700,letterSpacing:".08em",color:"#bbb",textTransform:"uppercase",marginBottom:8}}>
+            Custom Amount
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:10,background:"#fafafa",border:"2px solid #ebebeb",borderRadius:14,padding:"0 14px"}}>
+            <span style={{fontSize:15,fontWeight:700,color:"#666"}}>₦</span>
+            <input
+              type="number"
+              min="1"
+              step="1"
+              inputMode="numeric"
+              placeholder="Enter amount"
+              value={customAmount}
+              onChange={e=>onCustomChange(e.target.value)}
+              style={{
+                width:"100%",
+                border:"none",
+                background:"transparent",
+                padding:"15px 0",
+                outline:"none",
+                fontFamily:"var(--fn)",
+                fontSize:15,
+                fontWeight:600,
+                color:"var(--tx)"
+              }}
+            />
+          </div>
+        </div>
+        <div style={{background:"#f7f7f8",borderRadius:14,padding:"14px 18px",marginBottom:14,
+          display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <span style={{fontSize:13,color:"#999"}}>Approx. voice notes</span>
+          <span style={{fontSize:16,fontWeight:800}}>~{voiceCount}</span>
+        </div>
+        <div style={{fontSize:11.5,color:"#9a9a9a",marginBottom:22}}>
+          Each generation costs ₦4,000 for up to 400 characters.
+        </div>
+        <button onClick={()=>pay(sel)} disabled={busy || !canPay} style={{
+          width:"100%",padding:"17px",borderRadius:16,border:"none",
+          background:busy || !canPay ? "#9fd8b6" : "linear-gradient(135deg,var(--funds1),var(--funds2))",
+          color:"#fff",fontFamily:"var(--fn)",fontWeight:700,fontSize:15,cursor:busy?"default":"pointer",transition:"background .25s"}}>
+          {busy ? "Processing..." : canPay ? `Pay ₦${sel.toLocaleString()}` : "Enter valid amount"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+class ErrorBoundary extends React.Component {
+  constructor(props){
+    super(props);
+    this.state = {error:null};
+  }
+
+  static getDerivedStateFromError(error){
+    return {error};
+  }
+
+  componentDidCatch(error, info){
+    console.error("DropVoice preview crash", error, info);
+  }
+
+  render(){
+    if(this.state.error){
+      return (
+        <div style={{minHeight:"100dvh",display:"flex",alignItems:"center",justifyContent:"center",padding:24,background:"#fff"}}>
+          <div style={{width:"100%",maxWidth:520,background:"#fff5f5",border:"1px solid #ffd7d7",borderRadius:18,padding:20}}>
+            <div style={{fontSize:16,fontWeight:800,color:"#b91c1c",marginBottom:8}}>Preview crashed</div>
+            <div style={{fontSize:13,lineHeight:1.6,color:"#7f1d1d",whiteSpace:"pre-wrap"}}>
+              {this.state.error?.stack || this.state.error?.message || String(this.state.error)}
+            </div>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+function App(){
+  const [text,setText]=useState("");
+  const [emo,setEmo]=useState(0);
+  const [pace,setPace]=useState("normal");
+  const [terms,setTerms]=useState("");
+  const [lang,setLang]=useState("en");
+  const [file,setFile]=useState(null);
+  const [drag,setDrag]=useState(false);
+  const [funds,setFunds]=useState(false);
+  const [fundsBusy,setFundsBusy]=useState(false);
+  const [bal,setBal]=useState(0);
+  const [gen,setGen]=useState(false);
+  const [out,setOut]=useState(null);
+  const [play,setPlay]=useState(false);
+  const [langOpen,setLangOpen]=useState(false);
+  const [langs,setLangs]=useState([{code:"en",label:"English"}]);
+  const [charLimit,setCharLimit]=useState(400);
+  const [statusText,setStatusText]=useState("Booting backend preview...");
+  const [error,setError]=useState("");
+  const fileRef=useRef();
+  const audioRef=useRef(null);
+  const objectUrlRef=useRef(null);
+  const tokenRef=useRef(localStorage.getItem(TOKEN_KEY) || "");
+
+  const selLang = LANG_META[lang] || {flag:"🌍",label:lang};
+  const canGen = text.trim().length > 0 && !gen;
+
+  useEffect(() => {
+    bootstrap();
+    return () => {
+      if(objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleWindowError = event => {
+      const message = event?.error?.stack || event?.error?.message || event?.message || "Unexpected browser error.";
+      setError(message);
+      setStatusText("Frontend error.");
+    };
+    const handleRejection = event => {
+      const reason = event?.reason;
+      const message = reason?.stack || reason?.message || String(reason || "Unhandled promise rejection.");
+      setError(message);
+      setStatusText("Frontend error.");
+    };
+    window.addEventListener("error", handleWindowError);
+    window.addEventListener("unhandledrejection", handleRejection);
+    return () => {
+      window.removeEventListener("error", handleWindowError);
+      window.removeEventListener("unhandledrejection", handleRejection);
+    };
+  }, []);
+
+  useEffect(() => {
+    const audio = audioRef.current;
+    if(!audio) return;
+    const onPlay = () => setPlay(true);
+    const onPause = () => setPlay(false);
+    audio.addEventListener("play", onPlay);
+    audio.addEventListener("pause", onPause);
+    audio.addEventListener("ended", onPause);
+    return () => {
+      audio.removeEventListener("play", onPlay);
+      audio.removeEventListener("pause", onPause);
+      audio.removeEventListener("ended", onPause);
+    };
+  }, [out]);
+
+  async function api(path, options = {}){
+    const headers = new Headers(options.headers || {});
+    if(tokenRef.current && !headers.has("Authorization")) headers.set("Authorization", `Bearer ${tokenRef.current}`);
+    const response = await fetch(resolveBackendUrl(path), {...options, headers});
+    if(!response.ok){
+      let message = `Request failed (${response.status})`;
+      try{
+        const payload = await response.json();
+        message = payload.detail || message;
+      }catch(_err){}
+      throw new Error(message);
+    }
+    if(response.status === 204) return null;
+    const contentType = response.headers.get("content-type") || "";
+    if(contentType.includes("application/json")) return response.json();
+    return response;
+  }
+
+  async function bootstrap(){
+    try{
+      const installationId = ensureInstallationId();
+      const payload = await fetch(`${API_BASE}/device/bootstrap`, {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          installation_id: installationId,
+          platform: "local-preview",
+          app_version: "preview-1",
+        }),
+      }).then(async response => {
+        if(!response.ok) throw new Error(`Bootstrap failed (${response.status})`);
+        return response.json();
+      });
+      tokenRef.current = payload.device_token;
+      localStorage.setItem(TOKEN_KEY, payload.device_token);
+      setBal(payload.balance_kobo);
+      setLang(payload.default_language || "en");
+      setCharLimit(payload.char_limit || 400);
+      setLangs(payload.supported_languages || []);
+      setStatusText(`Connected to ${API_BASE}`);
+      await refreshWallet();
+    }catch(err){
+      setError(err.message || "Unable to bootstrap app.");
+      setStatusText("Backend unavailable");
+    }
+  }
+
+  async function refreshWallet(){
+    const payload = await api("/wallet");
+    setBal(payload.balance_kobo);
+    return payload;
+  }
+
+  function onFile(f){
+    if(!f) return;
+    const looksAudio = (f.type && f.type.startsWith("audio/")) || /\.(mp3|wav|m4a|aac|ogg|webm|flac)$/i.test(f.name || "");
+    if(!looksAudio){
+      setError("Please pick an audio file (mp3, wav, m4a, webm, etc.).");
+      return;
+    }
+    setError("");
+    setFile(f);
+  }
+
+  function openFilePicker(){
+    if(!fileRef.current) return;
+    fileRef.current.value = "";
+    fileRef.current.click();
+  }
+
+  async function handleTopup(amountNaira){
+    setFundsBusy(true);
+    setError("");
+    try{
+      const payload = await api("/topups/initiate", {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          amount_kobo: amountNaira * 100,
+          return_url: window.location.href,
+          cancel_url: window.location.href,
+        }),
+      });
+      if(payload.cashier_url){
+        window.open(payload.cashier_url, "_blank", "noopener,noreferrer");
+        setStatusText("OPay sandbox opened. Complete payment, then the wallet will sync.");
+        setFunds(false);
+        setFundsBusy(false);
+        pollTopup(payload.reference)
+          .then(() => refreshWallet())
+          .catch(err => setError(err.message || "Top-up sync failed."));
+        return;
+      }
+      await refreshWallet();
+      setFunds(false);
+      if(payload.status === "succeeded"){
+        setStatusText("Wallet credited.");
+      }
+    }catch(err){
+      setError(err.message || "Top-up failed.");
+    }finally{
+      setFundsBusy(false);
+    }
+  }
+
+  async function pollTopup(reference){
+    for(;;){
+      const payload = await api(`/topups/${reference}`);
+      if(payload.status === "succeeded"){
+        setStatusText("Wallet credited.");
+        return payload;
+      }
+      if(payload.status === "failed" || payload.status === "expired"){
+        setStatusText(`Top-up ${payload.status}.`);
+        return payload;
+      }
+      await new Promise(resolve => setTimeout(resolve, 2500));
+    }
+  }
+
+  async function loadAudioBlob(path){
+    const response = await api(path, {method:"GET"});
+    const blob = await response.blob();
+    if(objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
+    const url = URL.createObjectURL(blob);
+    objectUrlRef.current = url;
+    return {url, sizeBytes: blob.size};
+  }
+
+  async function clearAudio(job){
+    if(!job?.audioClearPath) return;
+    await api(job.audioClearPath, {method:"DELETE"});
+    if(objectUrlRef.current){
+      URL.revokeObjectURL(objectUrlRef.current);
+      objectUrlRef.current = null;
+    }
+    setOut(null);
+    setPlay(false);
+  }
+
+  async function pollGeneration(jobId){
+    for(;;){
+      const payload = await api(`/generations/${jobId}`);
+      if(payload.status === "completed" && payload.audio_download_url){
+        const audioBlob = await loadAudioBlob(payload.audio_download_url);
+        setOut({
+          id: payload.id,
+          dur: "--:--",
+          size: `${Math.round(audioBlob.sizeBytes / 1024)} KB`,
+          audioUrl: audioBlob.url,
+          audioPath: payload.audio_download_url,
+          audioClearPath: payload.audio_clear_url,
+          expiresAt: payload.expires_at,
+        });
+        setStatusText("Voice note ready.");
+        setGen(false);
+        return;
+      }
+      if(payload.status === "failed"){
+        setGen(false);
+        setError(payload.error_message || "Generation failed.");
+        setStatusText("Generation failed.");
+        return;
+      }
+      await new Promise(resolve => setTimeout(resolve, 1500));
+    }
+  }
+
+  async function generate(){
+    if(!canGen) return;
+    setGen(true);
+    setError("");
+    setOut(null);
+    setPlay(false);
+    setStatusText("Charging wallet and queueing generation...");
+    try{
+      const body = new FormData();
+      body.append("text", text.trim());
+      body.append("emotion", EMOTIONS[emo].label.toLowerCase());
+      body.append("language", lang);
+      body.append("pace", pace);
+      if(terms.trim()) body.append("important_terms", terms.trim());
+      if(file) body.append("voice_clone", file);
+      const payload = await api("/generations", {method:"POST", body});
+      setBal(payload.balance_kobo);
+      setStatusText(file ? "Custom voice clone submitted. Generating..." : "Generating...");
+      await pollGeneration(payload.id);
+    }catch(err){
+      setGen(false);
+      setError(err.message || "Generation failed.");
+      setStatusText("Generation failed.");
+    }
+  }
+
+  function handleDownload(){
+    if(!out?.audioUrl) return;
+    const link = document.createElement("a");
+    link.href = out.audioUrl;
+    link.download = `dropvoice-${out.id || "audio"}.wav`;
+    link.click();
+  }
+
+  async function handleShare(){
+    if(!out?.audioUrl) return;
+    try{
+      const blob = await fetch(out.audioUrl).then(r => r.blob());
+      const fileToShare = new File([blob], `dropvoice-${out.id || "audio"}.wav`, {type: blob.type || "audio/wav"});
+      if(navigator.share && navigator.canShare && navigator.canShare({files:[fileToShare]})){
+        await navigator.share({files:[fileToShare], title:"DropVoice", text:"Generated with DropVoice"});
+      }else{
+        await navigator.clipboard.writeText("DropVoice audio ready on device.");
+        setStatusText("Share fallback used. Message copied.");
+      }
+    }catch(err){
+      setError("Share failed on this device.");
+    }
+  }
+
+  return(
+    <div style={{display:"flex",flexDirection:"column",minHeight:"100dvh",background:"#fff"}}>
+      <header style={{padding:"18px 22px 14px",display:"flex",alignItems:"center",
+        justifyContent:"space-between",position:"sticky",top:0,zIndex:20,
+        background:"rgba(255,255,255,.9)",backdropFilter:"blur(18px)",
+        borderBottom:"1.5px solid #f0f0f0"}}>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <div style={{width:34,height:34,borderRadius:10,
+            background:"linear-gradient(135deg,var(--ac),var(--ac2))",
+            display:"flex",alignItems:"center",justifyContent:"center"}}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+              <path d="M12 2C9.24 2 7 4.24 7 7v5c0 2.76 2.24 5 5 5s5-2.24 5-5V7c0-2.76-2.24-5-5-5z" fill="white"/>
+              <path d="M3 12v1c0 4.97 4.03 9 9 9s9-4.03 9-9v-1" stroke="white" strokeWidth="2.2" strokeLinecap="round" fill="none"/>
+            </svg>
+          </div>
+          <span style={{fontWeight:800,fontSize:20,letterSpacing:"-.5px"}}>DropVoice</span>
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <span style={{fontSize:12,fontWeight:600,color:"#aaa"}}>{formatNairaFromKobo(bal)}</span>
+          <button onClick={()=>setFunds(true)} style={{
+            padding:"9px 16px",borderRadius:50,border:"none",
+            background:"linear-gradient(135deg,var(--funds1),var(--funds2))",
+            color:"#fff",fontFamily:"var(--fn)",fontWeight:700,fontSize:12.5,
+            cursor:"pointer",display:"flex",alignItems:"center",gap:6,
+            boxShadow:"0 4px 14px rgba(7,94,84,.32)"}}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round">
+              <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+            </svg>
+            Add Funds
+          </button>
+        </div>
+      </header>
+
+      <main style={{flex:1,padding:"22px 18px 48px",display:"flex",flexDirection:"column",gap:18}}>
+        <div style={{background:"#f7f7f8",border:"1px solid #ededed",borderRadius:14,padding:"12px 14px"}}>
+          <div style={{fontSize:12,fontWeight:700,color:"#7a7a7a",marginBottom:4}}>Local Preview</div>
+          <div style={{fontSize:12.5,color:"#999"}}>{statusText}</div>
+        </div>
+
+        {error && (
+          <div style={{background:"#fff5f5",border:"1px solid #ffd7d7",color:"var(--danger)",borderRadius:14,padding:"12px 14px",fontSize:12.5,fontWeight:600}}>
+            {error}
+          </div>
+        )}
+
+        <div style={{position:"relative"}}>
+          <textarea placeholder="Type what you want to say…" maxLength={charLimit} value={text}
+            onChange={e=>setText(e.target.value)}
+            style={{width:"100%",minHeight:128,padding:"18px 18px 32px",background:"#f0fdf4",
+              border:"2px solid #ebebeb",borderRadius:"20px 20px 20px 6px",resize:"none",
+              fontFamily:"var(--fn)",fontSize:15.5,fontWeight:500,lineHeight:1.65,
+              color:"var(--tx)",outline:"none",transition:"border-color .2s",textWrap:"pretty"}}
+            onFocus={e=>e.target.style.borderColor="var(--ac)"}
+            onBlur={e=>e.target.style.borderColor="#ebebeb"}/>
+          <div style={{position:"absolute",bottom:12,right:16,fontSize:11,fontWeight:600,
+            color:text.length>charLimit*.85?"#f87171":"#ccc"}}>
+            {text.length}/{charLimit}
+          </div>
+        </div>
+
+        <div>
+          <div style={{fontSize:10.5,fontWeight:700,letterSpacing:".08em",color:"#bbb",
+            textTransform:"uppercase",marginBottom:10}}>Emotion</div>
+          <div style={{display:"flex",gap:7,overflowX:"auto",paddingBottom:2,scrollbarWidth:"none"}}>
+            {EMOTIONS.map((e,i)=>(
+              <button key={i} onClick={()=>setEmo(i)} style={{
+                flexShrink:0,padding:"9px 14px",borderRadius:50,border:"2px solid",
+                borderColor:emo===i?"var(--ac)":"#ebebeb",
+                background:emo===i?"var(--acl)":"#fff",
+                color:emo===i?"var(--ac)":"#666",
+                fontFamily:"var(--fn)",fontWeight:600,fontSize:12.5,cursor:"pointer",
+                display:"flex",alignItems:"center",gap:5,transition:"all .15s",whiteSpace:"nowrap"}}>
+                {e.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <div style={{fontSize:10.5,fontWeight:700,letterSpacing:".08em",color:"#bbb",
+            textTransform:"uppercase",marginBottom:10}}>Pace</div>
+          <div style={{display:"flex",gap:7}}>
+            {PACES.map(p=>(
+              <button key={p.value} onClick={()=>setPace(p.value)} style={{
+                flex:1,padding:"9px 0",borderRadius:50,border:"2px solid",
+                borderColor:pace===p.value?"var(--ac)":"#ebebeb",
+                background:pace===p.value?"var(--acl)":"#fff",
+                color:pace===p.value?"var(--ac)":"#666",
+                fontFamily:"var(--fn)",fontWeight:600,fontSize:12.5,cursor:"pointer",
+                transition:"all .15s"}}>
+                {p.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <div style={{fontSize:10.5,fontWeight:700,letterSpacing:".08em",color:"#bbb",
+            textTransform:"uppercase",marginBottom:10}}>Pronunciation hints (optional)</div>
+          <input
+            type="text"
+            value={terms}
+            onChange={e=>setTerms(e.target.value)}
+            placeholder="LaTeX=lay tek, GitHub=git hub"
+            style={{width:"100%",padding:"13px 16px",borderRadius:14,
+              border:"2px solid #ebebeb",background:"#fafafa",
+              fontFamily:"var(--fn)",fontSize:13,fontWeight:500,color:"var(--tx)",
+              outline:"none",transition:"border-color .15s"}}
+            onFocus={e=>e.target.style.borderColor="var(--ac)"}
+            onBlur={e=>e.target.style.borderColor="#ebebeb"}
+          />
+          <div style={{fontSize:10.5,color:"#bbb",marginTop:6}}>
+            Format: <code>term=spelling, term=spelling</code>. Use exact case for proper nouns.
+          </div>
+        </div>
+
+        <div style={{display:"flex",gap:10,alignItems:"stretch",minHeight:76}}>
+          <div style={{position:"relative",flexShrink:0}}>
+            <button onClick={()=>setLangOpen(v=>!v)} style={{
+              height:"100%",minWidth:78,padding:"0 12px",borderRadius:16,
+              border:"2px solid #ebebeb",background:"#f8f8f9",fontFamily:"var(--fn)",
+              cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",
+              justifyContent:"center",gap:3,transition:"border-color .15s"}}>
+              <span style={{fontSize:24}}>{selLang.flag}</span>
+              <span style={{fontSize:10,color:"#aaa",fontWeight:600}}>{selLang.label}</span>
+            </button>
+            {langOpen&&(
+              <div style={{position:"absolute",bottom:"calc(100% + 8px)",left:0,
+                background:"#fff",border:"2px solid #ebebeb",borderRadius:14,
+                boxShadow:"0 8px 28px rgba(0,0,0,.11)",zIndex:50,width:176,
+                maxHeight:260,overflowY:"auto"}}>
+                {langs.map(l=>(
+                  <button key={l.code} onClick={()=>{setLang(l.code);setLangOpen(false)}}
+                    style={{width:"100%",padding:"11px 14px",background:lang===l.code?"var(--acl)":"transparent",
+                      border:"none",fontFamily:"var(--fn)",fontWeight:500,fontSize:13,cursor:"pointer",
+                      display:"flex",alignItems:"center",gap:9,
+                      color:lang===l.code?"var(--ac)":"#444",textAlign:"left"}}>
+                    <span>{(LANG_META[l.code] || {}).flag || "🌍"}</span>{l.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div onDragOver={e=>{e.preventDefault();setDrag(true)}}
+            onDragLeave={()=>setDrag(false)}
+            onDrop={e=>{e.preventDefault();setDrag(false);onFile(e.dataTransfer.files[0])}}
+            onClick={openFilePicker}
+            style={{flex:1,borderRadius:16,
+              border:`2px dashed ${drag||file?"var(--ac)":"#ddd"}`,
+              background:drag||file?"var(--acl)":"#f8f8f9",
+              display:"flex",alignItems:"center",
+              cursor:"pointer",padding:"0 14px",gap:10,transition:"all .2s"}}>
+            {!file?(
+              <>
+                <div style={{width:30,height:30,borderRadius:9,background:"#e8e8e8",flexShrink:0,
+                  display:"flex",alignItems:"center",justifyContent:"center"}}>
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#888" strokeWidth="2.5" strokeLinecap="round">
+                    <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+                  </svg>
+                </div>
+                <div>
+                  <div style={{fontSize:12.5,fontWeight:700,color:"#555"}}>Custom Voice</div>
+                  <div style={{fontSize:11,color:"#aaa"}}>Upload 5–20s audio sample</div>
+                </div>
+              </>
+            ):(
+              <>
+                <div style={{width:30,height:30,borderRadius:9,flexShrink:0,
+                  background:"linear-gradient(135deg,var(--ac),var(--ac2))",
+                  display:"flex",alignItems:"center",justifyContent:"center"}}>
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round">
+                    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+                    <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/>
+                  </svg>
+                </div>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:12,fontWeight:700,color:"var(--ac)",
+                    overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{file.name}</div>
+                  <div style={{fontSize:11,color:"#999"}}>{(file.size/1024).toFixed(0)} KB</div>
+                </div>
+                <button onClick={e=>{e.stopPropagation();setFile(null)}}
+                  style={{width:22,height:22,borderRadius:"50%",border:"none",background:"#ddd",
+                    cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#777" strokeWidth="2.8" strokeLinecap="round">
+                    <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                  </svg>
+                </button>
+              </>
+            )}
+            <input ref={fileRef} type="file" accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.webm,.flac"
+              style={{display:"none"}}
+              onChange={e=>{const f=e.target.files[0];e.target.value="";onFile(f);}}/>
+          </div>
+        </div>
+
+        <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:10,marginTop:6}}>
+          <div style={{position:"relative",display:"flex",justifyContent:"center",alignItems:"center"}}>
+            {canGen&&[0,.5].map((d,i)=>(
+              <div key={i} style={{position:"absolute",width:76,height:76,borderRadius:"50%",
+                background:"linear-gradient(135deg,var(--ac),var(--ac2))",
+                animation:`pulse 1.6s ease-out ${d}s infinite`}}/>
+            ))}
+            <button onClick={generate} disabled={!canGen}
+              style={{position:"relative",width:76,height:76,borderRadius:"50%",border:"none",
+                background:canGen?"linear-gradient(135deg,var(--ac),var(--ac2))":"#ebebeb",
+                cursor:canGen?"pointer":"not-allowed",
+                display:"flex",alignItems:"center",justifyContent:"center",
+                boxShadow:canGen?"0 8px 28px rgba(37,211,102,.38)":"none",
+                transition:"all .2s",transform:canGen&&!gen?"scale(1)":"scale(.95)"}}>
+              {gen?(
+                <svg style={{animation:"spin .75s linear infinite"}} width="26" height="26"
+                  viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round">
+                  <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74"/>
+                </svg>
+              ):(
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
+                  <path d="M12 1C9.24 1 7 3.24 7 6v5c0 2.76 2.24 5 5 5s5-2.24 5-5V6c0-2.76-2.24-5-5-5z"
+                    fill={canGen?"white":"#bbb"}/>
+                  <path d="M3 11v1c0 4.97 4.03 9 9 9s9-4.03 9-9v-1"
+                    stroke={canGen?"white":"#bbb"} strokeWidth="2.2" strokeLinecap="round" fill="none"/>
+                </svg>
+              )}
+            </button>
+          </div>
+          <span style={{fontSize:12,fontWeight:500,color:"#bbb"}}>
+            {gen?(<span style={{display:"flex",alignItems:"center",gap:3}}>
+              Generating
+              {[0,.18,.36].map((d,i)=>(
+                <span key={i} style={{width:5,height:5,borderRadius:"50%",background:"#25D366",
+                  display:"inline-block",animation:`dot-bounce 1s ease-in-out ${d}s infinite`}}/>
+              ))}
+            </span>):canGen?"Tap to generate":"Enter text to start"}
+          </span>
+        </div>
+
+        {out&&(
+          <div style={{background:"linear-gradient(135deg,rgba(37,211,102,.07),rgba(18,140,126,.07))",
+            border:"2px solid rgba(37,211,102,.18)",borderRadius:"20px 20px 20px 6px",padding:"18px",
+            animation:"up .4s cubic-bezier(.22,1,.36,1)"}}>
+            <audio ref={audioRef} src={out.audioUrl}
+              onLoadedMetadata={e=>{
+                const duration = e.currentTarget?.duration;
+                setOut(current => current ? {...current, dur: formatDuration(duration)} : current);
+              }}
+              style={{display:"none"}}/>
+            <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:14}}>
+              <button onClick={()=>audioRef.current && (audioRef.current.paused ? audioRef.current.play() : audioRef.current.pause())}
+                style={{width:44,height:44,borderRadius:"50%",border:"none",flexShrink:0,
+                  background:"linear-gradient(135deg,var(--ac),var(--ac2))",
+                  cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>
+                {play?(
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="white">
+                    <rect x="6" y="4" width="4" height="16" rx="1"/>
+                    <rect x="14" y="4" width="4" height="16" rx="1"/>
+                  </svg>
+                ):(
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="white">
+                    <polygon points="5 3 19 12 5 21 5 3"/>
+                  </svg>
+                )}
+              </button>
+              <div style={{flex:1}}><Bars on={play}/></div>
+              <div style={{flexShrink:0,textAlign:"right"}}>
+                <div style={{fontSize:13,fontWeight:700,color:"var(--ac)"}}>{out.dur}</div>
+                <div style={{fontSize:11,color:"#bbb"}}>{out.size}</div>
+              </div>
+            </div>
+            <div style={{display:"flex",gap:9}}>
+              <button onClick={handleDownload} style={{flex:1,padding:"11px",borderRadius:13,border:"none",
+                background:"linear-gradient(135deg,var(--ac),var(--ac2))",color:"#fff",
+                fontFamily:"var(--fn)",fontWeight:700,fontSize:13,cursor:"pointer",
+                display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.4" strokeLinecap="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                  <polyline points="7 10 12 15 17 10"/>
+                  <line x1="12" y1="15" x2="12" y2="3"/>
+                </svg>
+                Download
+              </button>
+              <button onClick={handleShare} style={{flex:1,padding:"11px",borderRadius:13,
+                border:"2px solid var(--ac)",background:"transparent",color:"var(--ac)",
+                fontFamily:"var(--fn)",fontWeight:700,fontSize:13,cursor:"pointer",
+                display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round">
+                  <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/>
+                  <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/>
+                  <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
+                </svg>
+                Share
+              </button>
+            </div>
+            <button onClick={()=>clearAudio(out)} style={{marginTop:12,border:"none",background:"transparent",color:"#999",fontFamily:"var(--fn)",fontSize:12.5,fontWeight:600,cursor:"pointer"}}>
+              Clear saved audio
+            </button>
+          </div>
+        )}
+      </main>
+
+      {funds&&<FundsModal onClose={()=>setFunds(false)} bal={bal} pay={handleTopup} busy={fundsBusy}/>}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(
+  <ErrorBoundary>
+    <App/>
+  </ErrorBoundary>
+);
+</script>
+</body>
+</html>
