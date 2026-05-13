@@ -89,7 +89,7 @@ Next steps:
    MOCK_PAYMENTS=false
    OPAY_API_BASE_URL=https://testapi.opaycheckout.com
    OPAY_CALLBACK_URL=http://${PUBLIC_HOST}/v1/topups/opay/webhook
-   CORS_ORIGINS=http://${PUBLIC_HOST}
+   CORS_ORIGINS=["http://${PUBLIC_HOST}"]
 
 3. Start the backend:
    bash deploy/run_backend_screen.sh
@@ -99,5 +99,5 @@ Next steps:
 
 If you later add HTTPS, update:
    OPAY_CALLBACK_URL=https://${PUBLIC_HOST}/v1/topups/opay/webhook
-   CORS_ORIGINS=https://${PUBLIC_HOST}
+   CORS_ORIGINS=["https://${PUBLIC_HOST}"]
 EOF

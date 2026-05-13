@@ -100,7 +100,7 @@ HTTPS setup complete for ${PUBLIC_IP}.
 
 Now update backend/.env:
   OPAY_CALLBACK_URL=https://${PUBLIC_IP}/v1/topups/opay/webhook
-  CORS_ORIGINS=https://${PUBLIC_IP}
+  CORS_ORIGINS=["https://${PUBLIC_IP}"]
 
 Verify:
   curl https://${PUBLIC_IP}/health
