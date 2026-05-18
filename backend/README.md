@@ -26,3 +26,25 @@ Run locally from `backend/` with:
 ```bash
 uvicorn app.main:app --reload
 ```
+
+Admin wallet helpers, also run from `backend/`:
+
+```bash
+../.venv/bin/python scripts/dropvoice_admin.py list-devices
+../.venv/bin/python scripts/dropvoice_admin.py credit-wallet --installation-id <installation_id> --amount-naira 20000
+```
+
+Admin website:
+
+- URL: `/admin`
+- Auth: HTTP Basic using `ADMIN_USERNAME` and `ADMIN_PASSWORD`
+- `ADMIN_PASSWORD` must be set in the server environment or `backend/.env`; otherwise the admin page is disabled.
+- The global price form writes to the database and overrides `PRICE_PER_GENERATION_KOBO` for new bootstraps and new generations.
+
+Do not commit production `.env` values. On the server, add only the missing admin lines manually:
+
+```bash
+cd ~/DropVoice/backend
+grep -q '^ADMIN_USERNAME=' .env || printf '\nADMIN_USERNAME=admin\n' >> .env
+grep -q '^ADMIN_PASSWORD=' .env || printf 'ADMIN_PASSWORD=change-this-password\n' >> .env
+```

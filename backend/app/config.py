@@ -17,6 +17,8 @@ class Settings(BaseSettings):
     api_prefix: str = "/v1"
     database_url: str = "sqlite+aiosqlite:///./dropvoice.db"
     device_token_secret: str = "change-me"
+    admin_username: str = "admin"
+    admin_password: str = ""
     cors_origins: list[str] = Field(
         default_factory=lambda: [
             "http://127.0.0.1:3000",

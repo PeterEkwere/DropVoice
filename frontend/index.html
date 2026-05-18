@@ -305,17 +305,64 @@ function App(){
     };
   }, [out]);
 
-  async function api(path, options = {}){
+  function buildRequestError(message, status){
+    const error = new Error(message);
+    error.status = status;
+    return error;
+  }
+
+  async function parseErrorResponse(response, fallbackPrefix = "Request failed"){
+    let message = `${fallbackPrefix} (${response.status})`;
+    if([301,302,307,308].includes(response.status)){
+      message = "API redirected. Use the HTTPS API base URL, not HTTP.";
+    }
+    try{
+      const payload = await response.json();
+      message = payload.detail || message;
+    }catch(_err){}
+    return buildRequestError(message, response.status);
+  }
+
+  function applyBootstrapPayload(payload){
+    tokenRef.current = payload.device_token;
+    localStorage.setItem(TOKEN_KEY, payload.device_token);
+    setBal(payload.balance_kobo);
+    setLang(payload.default_language || "en");
+    setCharLimit(payload.char_limit || 400);
+    setLangs(payload.supported_languages || []);
+  }
+
+  async function requestBootstrapPayload(){
+    const installationId = ensureInstallationId();
+    const response = await fetch(`${API_BASE}/device/bootstrap`, {
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({
+        installation_id: installationId,
+        platform: "local-preview",
+        app_version: "preview-1",
+      }),
+    });
+    if(!response.ok) throw await parseErrorResponse(response, "Bootstrap failed");
+    return response.json();
+  }
+
+  async function rebootstrapSilently(){
+    const payload = await requestBootstrapPayload();
+    applyBootstrapPayload(payload);
+    return payload;
+  }
+
+  async function api(path, options = {}, retryOnUnauthorized = true){
     const headers = new Headers(options.headers || {});
     if(tokenRef.current && !headers.has("Authorization")) headers.set("Authorization", `Bearer ${tokenRef.current}`);
     const response = await fetch(resolveBackendUrl(path), {...options, headers});
+    if(response.status === 401 && retryOnUnauthorized){
+      await rebootstrapSilently();
+      return api(path, options, false);
+    }
     if(!response.ok){
-      let message = `Request failed (${response.status})`;
-      try{
-        const payload = await response.json();
-        message = payload.detail || message;
-      }catch(_err){}
-      throw new Error(message);
+      throw await parseErrorResponse(response);
     }
     if(response.status === 204) return null;
     const contentType = response.headers.get("content-type") || "";
@@ -325,25 +372,8 @@ function App(){
 
   async function bootstrap(){
     try{
-      const installationId = ensureInstallationId();
-      const payload = await fetch(`${API_BASE}/device/bootstrap`, {
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({
-          installation_id: installationId,
-          platform: "local-preview",
-          app_version: "preview-1",
-        }),
-      }).then(async response => {
-        if(!response.ok) throw new Error(`Bootstrap failed (${response.status})`);
-        return response.json();
-      });
-      tokenRef.current = payload.device_token;
-      localStorage.setItem(TOKEN_KEY, payload.device_token);
-      setBal(payload.balance_kobo);
-      setLang(payload.default_language || "en");
-      setCharLimit(payload.char_limit || 400);
-      setLangs(payload.supported_languages || []);
+      const payload = await requestBootstrapPayload();
+      applyBootstrapPayload(payload);
       setStatusText(`Connected to ${API_BASE}`);
       await refreshWallet();
     }catch(err){
@@ -494,8 +524,13 @@ function App(){
       await pollGeneration(payload.id);
     }catch(err){
       setGen(false);
+      if(err.status === 402){
+        setFunds(true);
+        setStatusText("Add funds to continue.");
+      }else{
+        setStatusText("Generation failed.");
+      }
       setError(err.message || "Generation failed.");
-      setStatusText("Generation failed.");
     }
   }
 

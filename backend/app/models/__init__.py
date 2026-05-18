@@ -1,6 +1,7 @@
-from app.models.entities import Device, GenerationJob, JobStatus, Topup, TopupStatus, Wallet, WalletTransaction, WalletTransactionKind
+from app.models.entities import AppSetting, Device, GenerationJob, JobStatus, Topup, TopupStatus, Wallet, WalletTransaction, WalletTransactionKind
 
 __all__ = [
+    "AppSetting",
     "Device",
     "GenerationJob",
     "JobStatus",
@@ -10,4 +11,3 @@ __all__ = [
     "WalletTransaction",
     "WalletTransactionKind",
 ]
-

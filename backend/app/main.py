@@ -10,6 +10,7 @@ from sqlalchemy import text
 
 from app.config import get_settings
 from app.db.session import Base, engine
+from app.routes.admin import router as admin_router
 from app.routes.device import router as device_router
 from app.routes.generations import router as generations_router
 from app.routes.health import router as health_router
@@ -62,6 +63,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.include_router(admin_router)
 app.include_router(health_router)
 app.include_router(device_router, prefix=settings.api_prefix)
 app.include_router(wallet_router, prefix=settings.api_prefix)

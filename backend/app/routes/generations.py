@@ -16,6 +16,7 @@ from app.services.queue import GenerationProcessor
 from app.services.storage import delete_path, save_upload
 from app.services.wallets import apply_wallet_delta
 from app.models import WalletTransactionKind
+from app.services.app_settings import get_price_per_generation_kobo
 
 
 router = APIRouter(prefix="/generations", tags=["generations"])
@@ -56,8 +57,9 @@ async def create_generation(
     if pace_value not in VALID_PACES:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid pace value.")
 
+    price_per_generation_kobo = await get_price_per_generation_kobo(session)
     wallet = await session.get(Wallet, device.wallet.id)
-    if not wallet or wallet.balance_kobo < settings.price_per_generation_kobo:
+    if not wallet or wallet.balance_kobo < price_per_generation_kobo:
         raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail="Insufficient wallet balance.")
 
     clone_path = None
@@ -74,7 +76,7 @@ async def create_generation(
     await apply_wallet_delta(
         session,
         wallet,
-        delta_kobo=-settings.price_per_generation_kobo,
+        delta_kobo=-price_per_generation_kobo,
         kind=WalletTransactionKind.debit,
         reference=f"generation:charge:{device.id}:{datetime.now(timezone.utc).timestamp()}",
         details={"language": language, "emotion": emotion},
@@ -88,7 +90,7 @@ async def create_generation(
         pace=pace_value,
         important_terms_raw=(important_terms.strip() if important_terms else None) or None,
         model_id=settings.cartesia_model_id,
-        charged_kobo=settings.price_per_generation_kobo,
+        charged_kobo=price_per_generation_kobo,
         used_voice_clone=bool(clone_path),
         clone_input_path=clone_path,
         clone_content_type=clone_content_type,

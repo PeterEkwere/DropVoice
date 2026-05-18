@@ -86,7 +86,9 @@ Triggered by the header pill. Slides up from the bottom, backdrop blur.
 | Environment | Base URL |
 |---|---|
 | Local dev | `http://127.0.0.1:8000/v1` |
-| Staging / prod | provided separately |
+| Staging / prod | `https://151.80.190.160/v1` |
+
+Do not use the HTTP staging URL in the app. Port 80 redirects to HTTPS, and native HTTP clients may surface that redirect as `Request failed (301)` or another 3xx transport error instead of following it for multipart POSTs.
 
 All `/v1/*` endpoints (except `/v1/device/bootstrap`) require:
 
@@ -520,6 +522,17 @@ All errors are JSON:
 
 Always read `detail` from the body. Never display the raw body — wrap it in your own UI strings if you want.
 
+Important app mappings:
+
+| Status | Meaning | App behavior |
+|---|---|---|
+| `301` / `302` / `307` / `308` | wrong base URL or redirecting proxy, not an app business error | switch the API base to `https://151.80.190.160/v1`; do not show this as an input error |
+| `400` | invalid text, language, pace, or upload | show `detail` near the relevant input |
+| `401` | stale or invalid device token | silently bootstrap again and retry once |
+| `402` | wallet balance is below the generation price | open Add Funds automatically |
+
+Never display Dart object strings like `Instance of 'InputFailure'`. Convert every failure to a user-readable message before updating the UI.
+
 ---
 
 ## 8. Suggested file/module layout for the app
@@ -580,7 +593,7 @@ DropVoice/
 > You are building the DropVoice mobile app for iOS and Android. Your single source of truth is the document at `APP_DEV_GUIDE.md` in the repo root, plus the working web reference in `frontend/index.html`. You must:
 >
 > 1. Replicate the visual design of `frontend/index.html` exactly — colors, layout order, chip styles, gradient buttons, the chat-bubble border-radius on the textarea and output card, the bottom-sheet Add Funds modal. Use the WhatsApp green token map from § 1.1. The whole app is a single screen — no navigation, no tabs, no splash other than the bootstrap call.
-> 2. Implement the nine endpoints in § 3 in a single `DropVoiceClient` module. All money is in kobo. All authenticated calls carry `Authorization: Bearer <device_token>`. On 401, silently re-bootstrap once and retry.
+> 2. Implement the nine endpoints in § 3 in a single `DropVoiceClient` module. Use `https://151.80.190.160/v1` as the staging/prod API base URL unless told otherwise. All money is in kobo. All authenticated calls carry `Authorization: Bearer <device_token>`. On 401, silently re-bootstrap once and retry.
 > 3. Implement the OPay flow in § 5 with deep links `dropvoice://payments/return` and `dropvoice://payments/cancel`. Open the cashier URL in an in-app browser (SFSafariViewController on iOS, Custom Tabs on Android). Poll `GET /topups/{reference}` every 2.5s after the deep link returns, until terminal. Never store the OPay private key in the app — the backend handles that.
 > 4. Implement the generate flow: multipart POST, then poll `GET /generations/{id}` every 1.5s. On `completed` show the player; on `failed` show the `error_message` and refresh the wallet (server already refunded). On 402 auto-open Add Funds.
 > 5. Use `char_limit` from bootstrap, never hardcode 400. Use `supported_languages` for the language picker, never hardcode the list.

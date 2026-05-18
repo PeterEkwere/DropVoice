@@ -10,6 +10,7 @@ from app.models.entities import utcnow
 from app.schemas import BootstrapRequest, BootstrapResponse, SupportedLanguage
 from app.services.auth import issue_device_token
 from app.services.cartesia import LANGUAGE_LABELS
+from app.services.app_settings import get_price_per_generation_kobo
 
 
 router = APIRouter(prefix="/device", tags=["device"])
@@ -47,13 +48,14 @@ async def bootstrap_device(payload: BootstrapRequest, session: AsyncSession = De
         for code in settings.supported_languages
         if code in LANGUAGE_LABELS
     ]
+    price_per_generation_kobo = await get_price_per_generation_kobo(session)
     return BootstrapResponse(
         device_token=issue_device_token(device.id),
         balance_kobo=wallet.balance_kobo,
         currency=wallet.currency,
         default_language=settings.default_language,
         supported_languages=supported_languages,
-        price_per_generation_kobo=settings.price_per_generation_kobo,
+        price_per_generation_kobo=price_per_generation_kobo,
         char_limit=settings.char_limit,
         default_voice_label="Default English",
     )
